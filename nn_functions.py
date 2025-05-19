@@ -4,7 +4,8 @@ from jax import random
 from jax import nn
 from jax import hessian
 from jax.numpy.linalg import eigvalsh
-
+from functools import partial
+from jax import jit, grad
 import matplotlib.pyplot as plt
 
 def pack_params(params):
@@ -57,33 +58,55 @@ def predict(params, coord):
     return output, hidden_activations
 batched_predict = vmap(predict, in_axes=(None, 0))
 
-def loss(params, coord, target):
-    preds, _ = batched_predict(params, coord)
-    return jnp.mean(jnp.square(preds - target))
+# def loss(params, coord, target):
+#     preds, _ = batched_predict(params, coord)
+#     return jnp.mean(jnp.square(preds - target))
 
-@jit
-def update_sgd(params, x, y, step, aux):
-    grads  = grad(loss)(params, x, y)
+def loss(params, coord, target, lmbda=0.0, reg_type='ridge'):
+    """
+    params   : packed parameter vector
+    coord    : input coords
+    target   : true outputs
+    lmbda    : regularization strength
+    reg_type : 'ridge' or 'lasso'
+    """
+    # mean‐squared error
+    preds, _ = batched_predict(params, coord)
+    mse = jnp.mean((preds - target)**2)
+
+    # choose penalty
+    if reg_type == 'ridge':
+        penalty = jnp.sum(params**2)
+    elif reg_type == 'lasso':
+        penalty = jnp.sum(jnp.abs(params))
+    else:
+        raise ValueError(f"Unknown reg_type {reg_type!r}; use 'ridge' or 'lasso'")
+
+    return mse + lmbda * penalty
+
+@partial(jit, static_argnames=('loss_fn',))
+def update_sgd(params, x, y, step, aux, loss_fn, **args):
+    grads  = grad(loss_fn)(params, x, y)
     params = params - step * grads
     return params, aux, grads
 
-@jit
-def update_rmsprop(params, x, y, step_size, aux):
+@partial(jit, static_argnames=('loss_fn',))
+def update_rmsprop(params, x, y, step_size, aux, loss_fn, **args):
     beta = 0.9
-    grads = grad(loss)(params, x, y)
+    grads = grad(loss_fn)(params, x, y)
     aux = beta * aux + (1 - beta) * jnp.square(grads)
     step_size = step_size / (jnp.sqrt(aux) + 1e-8)
     params = params - step_size * grads
     return params, aux, grads
 
-@jit
-def update_adam(params, x, y, step_size, aux):
-    beta1 = 0.9
-    beta2 = 0.999
-    eps = 1e-8
+@partial(jit, static_argnames=('loss_fn',))
+def update_adam(params, x, y, step_size, aux, loss_fn, **args):
+    beta1 = args.get('beta1', 0.9)
+    beta2 = args.get('beta2', 0.999)
+    eps = args.get('eps', 1e-8)
 
     m, v = aux
-    grads = grad(loss)(params, x, y)
+    grads = grad(loss_fn)(params, x, y)
     m = beta1 * m + (1 - beta1) * grads
     v = beta2 * v + (1 - beta2) * jnp.square(grads)
 

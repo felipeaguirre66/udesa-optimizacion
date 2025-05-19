@@ -4,6 +4,7 @@ from jax import random
 from jax import nn
 
 import matplotlib.pyplot as plt
+from functools import partial
 
 from nn_functions import init_network_params, pack_params, layer_sizes
 from nn_functions import update_rmsprop, update_sgd, update_adam
@@ -14,8 +15,9 @@ def train_nn(
     update_method='adam',
     num_epochs=15,
     step_size=0.001,
+    use_adaptive_step_size=False,
     batch_size=32,
-    plot=True,
+    regularization=None,
     optimizer_params=None,
 ):
     # Load data
@@ -35,10 +37,16 @@ def train_nn(
     params = pack_params(params)
 
     # initialize gradients
+    if regularization == 'ridge':
+        loss_fn = partial(loss, lmbda=1e-4, reg_type='ridge')
+    elif regularization == 'lasso':
+        loss_fn = partial(loss, lmbda=5e-5, reg_type='lasso')
+    else:
+        loss_fn = partial(loss, lmbda=0, reg_type='lasso')
     xi, yi = next(get_batches(xx, ff, bs=batch_size))
     x0 = xi.copy()
     y0 = yi.copy()
-    grads = grad(loss)(params, x0, y0)
+    grads = grad(loss_fn)(params, x0, y0)
 
     # Initialize optimizer
     if update_method == 'adam':
@@ -64,10 +72,14 @@ def train_nn(
     for epoch in range(num_epochs):
         grads_epoch = []
 
+        if use_adaptive_step_size:
+            k = epoch // 5
+            step_size = step_size * (.5 ** k)
+        
         # shuffle & batch‐updates
         idxs = random.permutation(random.PRNGKey(epoch), xx.shape[0])
         for xi, yi in get_batches(xx[idxs], ff[idxs], bs=batch_size):
-            params, aux, grads = update(params, xi, yi, step_size, aux)
+            params, aux, grads = update(params, xi, yi, step_size, aux, loss_fn, **optimizer_params)
             grads_epoch.append(jnp.linalg.norm(grads))
 
         all_hidden_activations.append(batched_predict(params, xx)[1])
