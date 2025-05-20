@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from functools import partial
 
 from nn_functions import init_network_params, pack_params, layer_sizes
-from nn_functions import update_rmsprop, update_sgd, update_adam
+from nn_functions import update_rmsprop, update_sgd, update_adam, update_sgd_minibatch
 from nn_functions import get_batches, loss, batched_predict
 from nn_functions import top_eigenvalue
 
@@ -57,6 +57,10 @@ def train_nn(
         aux = jnp.square(grads)
     elif update_method == 'sgd':
         update = update_sgd
+        aux = None
+    elif update_method == 'minibatch':
+        update = update_sgd_minibatch
+        aux = None
     else:
         raise ValueError("Invalid update method. Choose 'adam', 'rmsprop', or 'sgd'.")
     
@@ -70,7 +74,7 @@ def train_nn(
     hess_max.append(float(top_eigenvalue(params, xx, ff)))
 
     for epoch in range(num_epochs):
-        grads_epoch = []
+        grads_norm_epoch = []
 
         if use_adaptive_step_size:
             k = epoch // 5
@@ -80,13 +84,13 @@ def train_nn(
         idxs = random.permutation(random.PRNGKey(epoch), xx.shape[0])
         for xi, yi in get_batches(xx[idxs], ff[idxs], bs=batch_size):
             params, aux, grads = update(params, xi, yi, step_size, aux, loss_fn, **optimizer_params)
-            grads_epoch.append(jnp.linalg.norm(grads))
+            grads_norm_epoch.append(jnp.linalg.norm(grads))
 
         all_hidden_activations.append(batched_predict(params, xx)[1])
-        grads_norm.append(jnp.mean(jnp.array(grads_epoch)))
+        grads_norm.append(jnp.mean(jnp.array(grads_norm_epoch)))
         hess_max.append(float(top_eigenvalue(params, xx, ff)))
         train_loss = loss(params, xx, ff)
         log_train.append(train_loss)
         print(f"Epoch {epoch} — Loss: {train_loss:.4e}  |  ‖grad‖: {grads_norm[-1]:.4e}  |  λ_max(H): {hess_max[-1]:.4e}")
     
-    return params, log_train, grads_norm, hess_max, all_hidden_activations
+    return {'params': params, 'log_train': log_train, 'grads_norm': grads_norm, 'hess_max': hess_max, 'all_hidden_activations': all_hidden_activations}

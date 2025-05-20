@@ -116,6 +116,13 @@ def update_adam(params, x, y, step_size, aux, loss_fn, **args):
     params = params - step_size * m_hat / (jnp.sqrt(v_hat) + eps)
     return params, (m, v), grads
 
+@partial(jit, static_argnames=('loss_fn',))
+def update_sgd_minibatch(params, x, y, step, aux, loss_fn, **args):
+    batch_size = x.shape[0]
+    grads = grad(loss_fn)(params, x, y)
+    grads = grads / batch_size  # Normalización explícita
+    params = params - step * grads
+    return params, aux, grads
 
 def get_batches(x, y, bs):
     for i in range(0, len(x), bs):
